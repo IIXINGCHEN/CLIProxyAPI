@@ -88,6 +88,9 @@ type Config struct {
 	// AmpCode contains Amp CLI upstream configuration, management restrictions, and model mappings.
 	AmpCode AmpCode `yaml:"ampcode" json:"ampcode"`
 
+	// GeminiFileCache configures local file storage for Gemini File API uploads.
+	GeminiFileCache GeminiFileCacheConfig `yaml:"gemini-file-cache,omitempty" json:"gemini-file-cache,omitempty"`
+
 	// OAuthExcludedModels defines per-provider global model exclusions applied to OAuth/file-backed auth entries.
 	OAuthExcludedModels map[string][]string `yaml:"oauth-excluded-models,omitempty" json:"oauth-excluded-models,omitempty"`
 
@@ -207,6 +210,21 @@ type AmpUpstreamAPIKeyEntry struct {
 
 	// APIKeys are the client API keys (from top-level api-keys) that map to this upstream key.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
+}
+
+// GeminiFileCacheConfig configures local file storage for Gemini File API uploads.
+type GeminiFileCacheConfig struct {
+	// Enable toggles local file caching for Gemini File API uploads.
+	Enable bool `yaml:"enable" json:"enable"`
+
+	// StoragePath specifies the directory for cached files. Empty defaults to "./gemini-files".
+	StoragePath string `yaml:"storage-path,omitempty" json:"storage-path,omitempty"`
+
+	// ExpirationHours defines how long files are retained (default: 48 hours to match Gemini API).
+	ExpirationHours int `yaml:"expiration-hours,omitempty" json:"expiration-hours,omitempty"`
+
+	// MaxTotalSizeMB limits total storage size in megabytes (0 = unlimited).
+	MaxTotalSizeMB int64 `yaml:"max-total-size-mb,omitempty" json:"max-total-size-mb,omitempty"`
 }
 
 // PayloadConfig defines default and override parameter rules applied to provider payloads.

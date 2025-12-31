@@ -25,8 +25,13 @@ case "$choice" in
   2)
     echo "--- Building from Source and Running ---"
 
+    if [ -n "$(git status --porcelain 2>/dev/null || true)" ] && [ "${ALLOW_DIRTY:-0}" != "1" ]; then
+      echo "git working tree is dirty. Commit/stash changes, or set ALLOW_DIRTY=1." 1>&2
+      exit 1
+    fi
+
     # Get Version Information
-    VERSION="$(git describe --tags --always --dirty)"
+    VERSION="$(git describe --tags --always)"
     COMMIT="$(git rev-parse --short HEAD)"
     BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

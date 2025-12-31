@@ -24,6 +24,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules"
 	ampmodule "github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules/amp"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/filestore"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
@@ -152,6 +153,9 @@ type Server struct {
 
 	// ampModule is the Amp routing module for model mapping hot-reload
 	ampModule *ampmodule.AmpModule
+
+	// geminiFileStore is the Gemini file cache storage instance
+	geminiFileStore *filestore.GeminiFileStore
 
 	// managementRoutesRegistered tracks whether the management routes have been attached to the engine.
 	managementRoutesRegistered atomic.Bool
@@ -315,6 +319,15 @@ func (s *Server) setupRoutes() {
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
 	openaiResponsesHandlers := openai.NewOpenAIResponsesAPIHandler(s.handlers)
 
+	// Initialize Gemini file store and attach file handler
+	fileStore, err := InitializeGeminiFileStore(s.cfg)
+	if err != nil {
+		log.WithError(err).Warn("failed to initialize gemini file store")
+	} else if fileStore != nil {
+		s.geminiFileStore = fileStore
+		AttachGeminiFileHandler(geminiHandlers, fileStore)
+	}
+
 	// OpenAI compatible API routes
 	v1 := s.engine.Group("/v1")
 	v1.Use(AuthMiddleware(s.accessManager))
@@ -334,6 +347,20 @@ func (s *Server) setupRoutes() {
 		v1beta.GET("/models", geminiHandlers.GeminiModels)
 		v1beta.POST("/models/*action", geminiHandlers.GeminiHandler)
 		v1beta.GET("/models/*action", geminiHandlers.GeminiGetHandler)
+
+		// Gemini File API routes (if file handler is available)
+		if geminiHandlers.FileHandler != nil {
+			v1beta.GET("/files", geminiHandlers.FileHandler.ListFiles)
+			v1beta.GET("/files/:fileId", geminiHandlers.FileHandler.GetFile)
+			v1beta.DELETE("/files/:fileId", geminiHandlers.FileHandler.DeleteFile)
+		}
+	}
+
+	// Gemini File Upload route (requires /upload prefix)
+	if geminiHandlers.FileHandler != nil {
+		uploadGroup := s.engine.Group("/upload")
+		uploadGroup.Use(AuthMiddleware(s.accessManager))
+		uploadGroup.POST("/v1beta/files", geminiHandlers.FileHandler.UploadFile)
 	}
 
 	// Root endpoint
@@ -805,6 +832,8 @@ func corsMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "*")
+		// Expose build metadata headers so browser-based UIs (e.g. Management Center) can read them cross-origin.
+		c.Header("Access-Control-Expose-Headers", "X-CPA-VERSION, X-CPA-COMMIT, X-CPA-BUILD-DATE")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
