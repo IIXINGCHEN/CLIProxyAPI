@@ -330,5 +330,23 @@ func (m *AmpModule) registerProviderAliases(engine *gin.Engine, baseHandler *han
 		v1betaAmp.GET("/models", geminiHandlers.GeminiModels)
 		v1betaAmp.POST("/models/*action", fallbackHandler.WrapHandler(geminiHandlers.GeminiHandler))
 		v1betaAmp.GET("/models/*action", geminiHandlers.GeminiGetHandler)
+
+		// Gemini File API routes (if file handler is available)
+		if geminiHandlers.FileHandler != nil {
+			v1betaAmp.GET("/files", geminiHandlers.FileHandler.ListFiles)
+			v1betaAmp.GET("/files/:fileId", geminiHandlers.FileHandler.GetFile)
+			v1betaAmp.DELETE("/files/:fileId", geminiHandlers.FileHandler.DeleteFile)
+		}
+	}
+
+	// Gemini File Upload routes at root level (requires /upload prefix)
+	// POST /upload/v1beta/files
+	if geminiHandlers.FileHandler != nil {
+		uploadGroup := engine.Group("/upload")
+		if auth != nil {
+			uploadGroup.Use(auth)
+		}
+		uploadGroup.Use(clientAPIKeyMiddleware())
+		uploadGroup.POST("/v1beta/files", geminiHandlers.FileHandler.UploadFile)
 	}
 }

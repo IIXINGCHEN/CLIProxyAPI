@@ -12,7 +12,13 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG BUILD_DATE=unknown
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o ./CLIProxyAPI ./cmd/server/
+RUN if [ "${VERSION}" = "dev" ] || [ "${COMMIT}" = "none" ] || [ "${BUILD_DATE}" = "unknown" ]; then \
+      echo "production build required: VERSION/COMMIT/BUILD_DATE must be injected via build args" 1>&2; \
+      echo "got VERSION=${VERSION} COMMIT=${COMMIT} BUILD_DATE=${BUILD_DATE}" 1>&2; \
+      exit 1; \
+    fi
+
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o ./CLIProxyAPI ./cmd/server/
 
 FROM alpine:3.22.0
 
@@ -29,6 +35,7 @@ WORKDIR /CLIProxyAPI
 EXPOSE 8317
 
 ENV TZ=Asia/Shanghai
+ENV GIN_MODE=release
 
 RUN cp /usr/share/zoneinfo/${TZ} /etc/localtime && echo "${TZ}" > /etc/timezone
 

@@ -91,7 +91,7 @@ func (h *Handler) SetLogDirectory(dir string) {
 
 // Middleware enforces access control for management endpoints.
 // All requests (local and remote) require a valid management key.
-// Additionally, remote access requires allow-remote-management=true.
+// Additionally, remote (non-localhost) access requires remote-management.allow-remote=true.
 func (h *Handler) Middleware() gin.HandlerFunc {
 	const maxFailures = 5
 	const banDuration = 30 * time.Minute
@@ -137,7 +137,10 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 			h.attemptsMu.Unlock()
 
 			if !allowRemote {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "remote management disabled"})
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"error": "remote management disabled",
+					"hint":  "Set remote-management.allow-remote: true in config.yaml to allow non-localhost access.",
+				})
 				return
 			}
 
@@ -157,7 +160,10 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 			}
 		}
 		if secretHash == "" && envSecret == "" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "remote management key not set"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "remote management key not set",
+				"hint":  "Set remote-management.secret-key in config.yaml (or MANAGEMENT_PASSWORD) to enable management authentication.",
+			})
 			return
 		}
 

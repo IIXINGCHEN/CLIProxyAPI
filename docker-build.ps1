@@ -23,8 +23,17 @@ switch ($choice) {
     "2" {
         Write-Host "--- Building from Source and Running ---"
 
+        # Refuse dirty working tree by default for production builds
+        $dirty = $false
+        $status = (& git status --porcelain)
+        if ($status -and $status.Count -gt 0) { $dirty = $true }
+        if ($dirty -and $env:ALLOW_DIRTY -ne "1") {
+            Write-Host "git working tree is dirty. Commit/stash changes, or set `$env:ALLOW_DIRTY=1`."
+            exit 1
+        }
+
         # Get Version Information
-        $VERSION = (git describe --tags --always --dirty)
+        $VERSION = (git describe --tags --always)
         $COMMIT  = (git rev-parse --short HEAD)
         $BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 

@@ -88,6 +88,9 @@ type Config struct {
 	// AmpCode contains Amp CLI upstream configuration, management restrictions, and model mappings.
 	AmpCode AmpCode `yaml:"ampcode" json:"ampcode"`
 
+	// GeminiFileCache configures local file storage for Gemini File API uploads.
+	GeminiFileCache GeminiFileCacheConfig `yaml:"gemini-file-cache,omitempty" json:"gemini-file-cache,omitempty"`
+
 	// OAuthExcludedModels defines per-provider global model exclusions applied to OAuth/file-backed auth entries.
 	OAuthExcludedModels map[string][]string `yaml:"oauth-excluded-models,omitempty" json:"oauth-excluded-models,omitempty"`
 
@@ -209,6 +212,21 @@ type AmpUpstreamAPIKeyEntry struct {
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 }
 
+// GeminiFileCacheConfig configures local file storage for Gemini File API uploads.
+type GeminiFileCacheConfig struct {
+	// Enable toggles local file caching for Gemini File API uploads.
+	Enable bool `yaml:"enable" json:"enable"`
+
+	// StoragePath specifies the directory for cached files. Empty defaults to "./gemini-files".
+	StoragePath string `yaml:"storage-path,omitempty" json:"storage-path,omitempty"`
+
+	// ExpirationHours defines how long files are retained (default: 48 hours to match Gemini API).
+	ExpirationHours int `yaml:"expiration-hours,omitempty" json:"expiration-hours,omitempty"`
+
+	// MaxTotalSizeMB limits total storage size in megabytes (0 = unlimited).
+	MaxTotalSizeMB int64 `yaml:"max-total-size-mb,omitempty" json:"max-total-size-mb,omitempty"`
+}
+
 // PayloadConfig defines default and override parameter rules applied to provider payloads.
 type PayloadConfig struct {
 	// Default defines rules that only set parameters when they are missing in the payload.
@@ -268,6 +286,9 @@ type ClaudeModel struct {
 	Alias string `yaml:"alias" json:"alias"`
 }
 
+func (m ClaudeModel) GetName() string  { return m.Name }
+func (m ClaudeModel) GetAlias() string { return m.Alias }
+
 // CodexKey represents the configuration for a Codex API key,
 // including the API key itself and an optional base URL for the API endpoint.
 type CodexKey struct {
@@ -303,6 +324,9 @@ type CodexModel struct {
 	Alias string `yaml:"alias" json:"alias"`
 }
 
+func (m CodexModel) GetName() string  { return m.Name }
+func (m CodexModel) GetAlias() string { return m.Alias }
+
 // GeminiKey represents the configuration for a Gemini API key,
 // including optional overrides for upstream base URL, proxy routing, and headers.
 type GeminiKey struct {
@@ -318,12 +342,27 @@ type GeminiKey struct {
 	// ProxyURL optionally overrides the global proxy for this API key.
 	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
 
+	// Models defines upstream model names and aliases for request routing.
+	Models []GeminiModel `yaml:"models,omitempty" json:"models,omitempty"`
+
 	// Headers optionally adds extra HTTP headers for requests sent with this key.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 
 	// ExcludedModels lists model IDs that should be excluded for this provider.
 	ExcludedModels []string `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
 }
+
+// GeminiModel describes a mapping between an alias and the actual upstream model name.
+type GeminiModel struct {
+	// Name is the upstream model identifier used when issuing requests.
+	Name string `yaml:"name" json:"name"`
+
+	// Alias is the client-facing model name that maps to Name.
+	Alias string `yaml:"alias" json:"alias"`
+}
+
+func (m GeminiModel) GetName() string  { return m.Name }
+func (m GeminiModel) GetAlias() string { return m.Alias }
 
 // OpenAICompatibility represents the configuration for OpenAI API compatibility
 // with external providers, allowing model aliases to be routed through OpenAI API format.

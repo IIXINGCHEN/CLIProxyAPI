@@ -7,6 +7,7 @@ package gemini
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	. "github.com/router-for-me/CLIProxyAPI/v6/internal/constant"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/filestore"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
@@ -23,6 +25,7 @@ import (
 // It holds a pool of clients to interact with the backend service.
 type GeminiAPIHandler struct {
 	*handlers.BaseAPIHandler
+	FileHandler *GeminiFileAPIHandler // Optional file API handler
 }
 
 // NewGeminiAPIHandler creates a new Gemini API handlers instance.
@@ -226,6 +229,11 @@ func (h *GeminiAPIHandler) GeminiHandler(c *gin.Context) {
 func (h *GeminiAPIHandler) handleStreamGenerateContent(c *gin.Context, modelName string, rawJSON []byte) {
 	alt := h.GetAlt(c)
 
+	rawJSON, ok := h.maybeRewriteLocalFiles(c, rawJSON)
+	if !ok {
+		return
+	}
+
 	// Get the http.Flusher interface to manually flush the response.
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
@@ -312,6 +320,10 @@ func (h *GeminiAPIHandler) handleStreamGenerateContent(c *gin.Context, modelName
 func (h *GeminiAPIHandler) handleCountTokens(c *gin.Context, modelName string, rawJSON []byte) {
 	c.Header("Content-Type", "application/json")
 	alt := h.GetAlt(c)
+	rawJSON, ok := h.maybeRewriteLocalFiles(c, rawJSON)
+	if !ok {
+		return
+	}
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	resp, errMsg := h.ExecuteCountWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, alt)
 	if errMsg != nil {
@@ -335,6 +347,10 @@ func (h *GeminiAPIHandler) handleCountTokens(c *gin.Context, modelName string, r
 func (h *GeminiAPIHandler) handleGenerateContent(c *gin.Context, modelName string, rawJSON []byte) {
 	c.Header("Content-Type", "application/json")
 	alt := h.GetAlt(c)
+	rawJSON, ok := h.maybeRewriteLocalFiles(c, rawJSON)
+	if !ok {
+		return
+	}
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	resp, errMsg := h.ExecuteWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, alt)
 	if errMsg != nil {
@@ -344,6 +360,84 @@ func (h *GeminiAPIHandler) handleGenerateContent(c *gin.Context, modelName strin
 	}
 	_, _ = c.Writer.Write(resp)
 	cliCancel()
+}
+
+func (h *GeminiAPIHandler) maybeRewriteLocalFiles(c *gin.Context, rawJSON []byte) ([]byte, bool) {
+	store := localFileStore(h)
+	if store == nil {
+		return rawJSON, true
+	}
+	apiKey := extractAPIKeyFromContext(c)
+	updated, err := rewriteLocalFileParts(c.Request.Context(), rawJSON, store, apiKey)
+	return respondFileRewriteResult(c, updated, err)
+}
+
+func extractAPIKeyFromContext(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if apiKey := apiKeyFromGinContext(c); apiKey != "" {
+		return apiKey
+	}
+	return apiKeyFromRequest(c)
+}
+
+func localFileStore(h *GeminiAPIHandler) *filestore.GeminiFileStore {
+	if h == nil || h.FileHandler == nil {
+		return nil
+	}
+	return h.FileHandler.fileStore
+}
+
+func respondFileRewriteResult(c *gin.Context, payload []byte, err error) ([]byte, bool) {
+	if err == nil {
+		return payload, true
+	}
+	status, body := fileRewriteErrorResponse(err)
+	c.JSON(status, body)
+	return nil, false
+}
+
+func fileRewriteErrorResponse(err error) (int, gin.H) {
+	if errors.Is(err, filestore.ErrFileNotFound) {
+		return http.StatusBadRequest, gin.H{"error": gin.H{"message": "invalid file reference", "status": "INVALID_ARGUMENT"}}
+	}
+	if errors.Is(err, filestore.ErrFileTooLarge) {
+		return http.StatusBadRequest, gin.H{"error": gin.H{"message": "file too large", "status": "INVALID_ARGUMENT"}}
+	}
+	return http.StatusInternalServerError, gin.H{"error": gin.H{"message": "failed to resolve file reference", "status": "INTERNAL"}}
+}
+
+func apiKeyFromGinContext(c *gin.Context) string {
+	apiKey, exists := c.Get("apiKey")
+	if !exists {
+		return ""
+	}
+	keyStr, ok := apiKey.(string)
+	if !ok {
+		return ""
+	}
+	return keyStr
+}
+
+func apiKeyFromRequest(c *gin.Context) string {
+	if key := bearerOrRawAuthorization(c.GetHeader("Authorization")); key != "" {
+		return key
+	}
+	if key := c.GetHeader("X-Goog-Api-Key"); key != "" {
+		return key
+	}
+	if key := c.GetHeader("X-Api-Key"); key != "" {
+		return key
+	}
+	return c.Query("key")
+}
+
+func bearerOrRawAuthorization(header string) string {
+	if strings.HasPrefix(header, "Bearer ") {
+		return strings.TrimPrefix(header, "Bearer ")
+	}
+	return header
 }
 
 func (h *GeminiAPIHandler) forwardGeminiStream(c *gin.Context, flusher http.Flusher, alt string, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage) {

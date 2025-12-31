@@ -9,6 +9,7 @@ config.yaml
 # Generated content
 bin/*
 logs/*
+gemini-files/*
 conv/*
 temp/*
 refs/*
