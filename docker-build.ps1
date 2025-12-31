@@ -33,9 +33,14 @@ switch ($choice) {
         }
 
         # Get Version Information
-        $VERSION = (git describe --tags --always)
+        $VERSION = (git describe --tags --abbrev=0)
         $COMMIT  = (git rev-parse --short HEAD)
         $BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+        if (-not $VERSION -or $VERSION -eq "dev") {
+            Write-Host "production docker build requires a git tag (e.g. v6.6.74). Create a tag first."
+            exit 1
+        }
 
         Write-Host "Building with the following info:"
         Write-Host "  Version: $VERSION"

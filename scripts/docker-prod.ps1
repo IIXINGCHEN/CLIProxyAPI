@@ -32,10 +32,14 @@ if ($dirty -and -not $AllowDirty) {
   throw "git working tree is dirty. Commit/stash changes, or re-run with -AllowDirty."
 }
 
-$env:VERSION = (git describe --tags --always --dirty).Trim()
+$env:VERSION = (git describe --tags --abbrev=0).Trim()
 $env:COMMIT = (git rev-parse --short HEAD).Trim()
 $env:BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $env:CLI_PROXY_IMAGE = $Image
+
+if (-not $env:VERSION -or $env:VERSION -eq "dev") {
+  throw "docker production build requires a git tag (e.g. v6.6.74). Create a tag first."
+}
 
 Write-Host "Docker production build..."
 Write-Host "  Service: $ComposeService"

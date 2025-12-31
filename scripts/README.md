@@ -5,6 +5,7 @@
  - 使用 `-ldflags -X ...` 注入 `Version`/`Commit`/`BuildDate`, 避免启动时显示 `dev/none/unknown`.
  - 设置 `GIN_MODE=release` 与 `CGO_ENABLED=0`.
  - 约束默认情况下不允许 dirty 工作区直接构建(避免版本号出现 `-dirty`).
+ - 约束生产版本号必须来自 git tag, 只输出 `v6.6.74` 这种格式, 不输出 `-gxxxx`.
 
 ### Windows (PowerShell)
 
@@ -46,7 +47,7 @@ ALLOW_DIRTY=1 ./scripts/start-prod.sh
 说明:
 
  - 启动脚本默认要求 clean 工作区, 避免不可复现的构建.
- - 即使允许 dirty, 脚本也不会把 `-dirty` 拼进 Version, 避免“伪版本号”污染生产日志.
+ - 生产构建脚本使用 `git describe --tags --abbrev=0` 取最近的 tag, 只输出 `v6.6.74` 这种格式.
 
 ### Docker 生产构建与启动
 

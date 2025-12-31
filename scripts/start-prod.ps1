@@ -44,9 +44,13 @@ if ($dirty -and -not $AllowDirty) {
   throw "git working tree is dirty. Commit/stash changes, or re-run with -AllowDirty."
 }
 
-$version = Get-GitValue "describe --tags --always" "dev"
+$version = Get-GitValue "describe --tags --abbrev=0" "dev"
 $commit = Get-GitValue "rev-parse --short HEAD" "none"
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+if ($version -eq "dev") {
+  throw "production build requires a git tag (e.g. v6.6.74). Create a tag, or set Version explicitly."
+}
 
 Write-Host "Building production binary..."
 Write-Host "  Version: $version"

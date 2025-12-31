@@ -31,9 +31,14 @@ case "$choice" in
     fi
 
     # Get Version Information
-    VERSION="$(git describe --tags --always)"
+    VERSION="$(git describe --tags --abbrev=0)"
     COMMIT="$(git rev-parse --short HEAD)"
     BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    if [ -z "${VERSION}" ] || [ "${VERSION}" = "dev" ]; then
+      echo "production docker build requires a git tag (e.g. v6.6.74). Create a tag first." 1>&2
+      exit 1
+    fi
 
     echo "Building with the following info:"
     echo "  Version: ${VERSION}"

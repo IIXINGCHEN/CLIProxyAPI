@@ -25,9 +25,14 @@ export COMMIT
 export BUILD_DATE
 export CLI_PROXY_IMAGE
 
-VERSION="$(git describe --tags --always --dirty)"
 COMMIT="$(git rev-parse --short HEAD)"
 BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+VERSION="$(git describe --tags --abbrev=0)"
+if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then
+  echo "docker production build requires a git tag (e.g. v6.6.74). Create a tag first." 1>&2
+  exit 1
+fi
 
 echo "Docker production build..."
 echo "  Service: ${COMPOSE_SERVICE}"

@@ -29,10 +29,15 @@ fi
 VERSION="dev"
 COMMIT="none"
 if command -v git >/dev/null 2>&1; then
-  VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+  VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo dev)"
   COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo none)"
 fi
 BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+if [ "$VERSION" = "dev" ]; then
+  echo "production build requires a git tag (e.g. v6.6.74). Create a tag, or set VERSION explicitly." 1>&2
+  exit 1
+fi
 
 echo "Building production binary..."
 echo "  Version: $VERSION"
