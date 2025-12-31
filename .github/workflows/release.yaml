@@ -4,7 +4,7 @@ on:
   push:
     # run only against tags
     tags:
-      - '*'
+      - 'v*'
 
 permissions:
   contents: write
@@ -23,7 +23,11 @@ jobs:
           cache: true
       - name: Generate Build Metadata
         run: |
-          echo VERSION=`git describe --tags --always --dirty` >> $GITHUB_ENV
+          if ! echo "${GITHUB_REF_NAME}" | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$' >/dev/null; then
+            echo "invalid tag: ${GITHUB_REF_NAME}. Required format: v6.6.74" 1>&2
+            exit 1
+          fi
+          echo VERSION="${GITHUB_REF_NAME}" >> $GITHUB_ENV
           echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
           echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
       - uses: goreleaser/goreleaser-action@v4

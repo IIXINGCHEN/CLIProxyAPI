@@ -68,3 +68,23 @@ macOS/Linux:
 chmod +x ./scripts/docker-prod.sh
 ./scripts/docker-prod.sh
 ```
+
+### 发布 Release (自动触发 GitHub Releases)
+
+说明:
+
+ - 仓库已配置 GitHub Actions, 在 `git push origin vX.Y.Z` 时自动运行 GoReleaser 并发布 release.
+ - 发布脚本会检查 clean 工作区与分支(默认 `main`), 并创建/推送 tag.
+
+Windows:
+
+```powershell
+.\scripts\release-prod.ps1 -Version v6.6.74
+```
+
+macOS/Linux:
+
+```sh
+chmod +x ./scripts/release-prod.sh
+VERSION=v6.6.74 ./scripts/release-prod.sh
+```
