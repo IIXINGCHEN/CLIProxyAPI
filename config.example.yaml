@@ -19,7 +19,8 @@ remote-management:
 
   # Management key. If a plaintext value is provided here, it will be hashed on startup.
   # All management requests (even from localhost) require this key.
-  # Leave empty to disable the Management API entirely (404 for all /v0/management routes).
+  # Alternatively, set MANAGEMENT_PASSWORD in the environment instead of using this field.
+  # Leave both empty to disable the Management API entirely (404 for all /v0/management routes).
   secret-key: ""
 
   # Disable the bundled management control panel asset download and HTTP route when true.
@@ -76,6 +77,22 @@ routing:
 
 # When true, enable authentication for the WebSocket API (/v1/ws).
 ws-auth: false
+
+# Gemini Files API (optional)
+# When enabled, exposes Gemini Files API endpoints:
+# - POST /upload/v1beta/files
+# - GET /v1beta/files
+# - GET /v1beta/files/:fileId
+# - DELETE /v1beta/files/:fileId
+#
+# The default mode "upstream" proxies the official Gemini Files API (recommended).
+# The mode "local" enables the legacy local cache + inline_data rewrite behavior.
+# gemini-file-cache:
+#   enable: false
+#   mode: "upstream" # "upstream" (default) or "local"
+#   storage-path: "./gemini-files" # used only when mode is "local"
+#   expiration-hours: 48           # used only when mode is "local"
+#   max-total-size-mb: 10240       # used only when mode is "local" (0 = unlimited)
 
 # Streaming behavior (SSE keep-alives + safe bootstrap retries).
 # streaming:
