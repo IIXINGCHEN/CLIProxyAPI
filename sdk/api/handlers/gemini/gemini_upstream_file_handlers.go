@@ -3,6 +3,7 @@ package gemini
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -257,8 +258,11 @@ func (h *GeminiUpstreamFileAPIHandler) writeProxyResponse(c *gin.Context, resp c
 }
 
 func writeProxyError(c *gin.Context, err error) {
-	status := http.StatusInternalServerError
-	body := []byte(err.Error())
+	status := proxyErrorStatus(err)
+	body := []byte(strings.TrimSpace(err.Error()))
+	if len(body) == 0 {
+		body = []byte(http.StatusText(status))
+	}
 	if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
 		if code := se.StatusCode(); code > 0 {
 			status = code
@@ -269,7 +273,19 @@ func writeProxyError(c *gin.Context, err error) {
 			applyResponseHeaders(c, hdr)
 		}
 	}
-	c.Data(status, contentTypeFromBytes(body), body)
+	if json.Valid(bytes.TrimSpace(body)) {
+		c.Data(status, "application/json", body)
+		return
+	}
+	msg := string(body)
+	c.JSON(status, gin.H{
+		"error": gin.H{
+			"code":    status,
+			"message": msg,
+			"status":  googleStatusForHTTP(status),
+		},
+		"message": msg,
+	})
 }
 
 func contentTypeFromBytes(body []byte) string {
@@ -305,6 +321,49 @@ func unpackProxyMetadata(meta map[string]any) (int, http.Header) {
 	status, _ := meta[cliproxyResponseStatusKey].(int)
 	hdr, _ := meta[cliproxyResponseHeadersKey].(http.Header)
 	return status, hdr
+}
+
+func proxyErrorStatus(err error) int {
+	if err == nil {
+		return http.StatusInternalServerError
+	}
+	if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
+		if code := se.StatusCode(); code > 0 {
+			return code
+		}
+	}
+	if ae, ok := err.(*coreauth.Error); ok && ae != nil {
+		switch ae.Code {
+		case "executor_not_found", "auth_not_found":
+			return http.StatusServiceUnavailable
+		case "provider_not_found":
+			return http.StatusBadRequest
+		}
+	}
+	return http.StatusInternalServerError
+}
+
+func googleStatusForHTTP(code int) string {
+	switch code {
+	case http.StatusBadRequest:
+		return "INVALID_ARGUMENT"
+	case http.StatusUnauthorized:
+		return "UNAUTHENTICATED"
+	case http.StatusForbidden:
+		return "PERMISSION_DENIED"
+	case http.StatusNotFound:
+		return "NOT_FOUND"
+	case http.StatusTooManyRequests:
+		return "RESOURCE_EXHAUSTED"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return "DEADLINE_EXCEEDED"
+	case http.StatusServiceUnavailable, http.StatusBadGateway:
+		return "UNAVAILABLE"
+	}
+	if code >= http.StatusInternalServerError {
+		return "INTERNAL"
+	}
+	return "UNKNOWN"
 }
 
 func authIDFromMetadata(meta map[string]any) string {

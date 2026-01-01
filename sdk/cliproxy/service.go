@@ -440,6 +440,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	s.ensureWebsocketGateway()
+	s.registerStaticExecutors()
 	s.bootstrapCoreAuths(ctx)
 	s.rebindExecutors()
 
@@ -599,6 +600,13 @@ func (s *Service) Run(ctx context.Context) error {
 
 type authSynthesizer interface {
 	Synthesize(ctx *synthesizer.SynthesisContext) ([]*coreauth.Auth, error)
+}
+
+func (s *Service) registerStaticExecutors() {
+	if s == nil || s.coreManager == nil || s.cfg == nil {
+		return
+	}
+	s.coreManager.RegisterExecutor(executor.NewGeminiExecutor(s.cfg))
 }
 
 func (s *Service) bootstrapCoreAuths(ctx context.Context) {
