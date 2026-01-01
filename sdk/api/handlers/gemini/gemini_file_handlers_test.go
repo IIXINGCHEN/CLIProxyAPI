@@ -164,3 +164,33 @@ func TestGeminiFiles_Delete_InvalidFileID_NotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
+
+func TestGeminiFiles_UploadResumableStart_ReturnsUploadURLWithKey(t *testing.T) {
+	store, _ := newTestStore(t)
+	defer store.Close()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewGeminiFileAPIHandler(store)
+	r.POST("/upload/v1beta/files", h.UploadFile)
+
+	req := httptest.NewRequest(http.MethodPost, "/upload/v1beta/files", strings.NewReader(`{"file":{"displayName":"x"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer key-a")
+	req.Header.Set("X-Goog-Upload-Protocol", "resumable")
+	req.Header.Set("X-Goog-Upload-Command", "start")
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	uploadURL := rec.Header().Get("X-Goog-Upload-URL")
+	if !strings.Contains(uploadURL, "upload_id=") {
+		t.Fatalf("expected upload_id in url, got %q", uploadURL)
+	}
+	if !strings.Contains(uploadURL, "key=key-a") {
+		t.Fatalf("expected key in url, got %q", uploadURL)
+	}
+}

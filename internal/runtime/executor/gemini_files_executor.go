@@ -76,6 +76,14 @@ func (e *GeminiExecutor) executeFiles(ctx context.Context, auth *cliproxyauth.Au
 }
 
 func (e *GeminiExecutor) buildGeminiFilesRequest(action string, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (string, string, io.Reader, error) {
+	if action == "files.upload" {
+		if raw, ok := opts.Metadata[cliproxyexecutor.GeminiFilesUploadURLMetadataKey].(string); ok {
+			if v := strings.TrimSpace(raw); v != "" {
+				return http.MethodPost, v, geminiFilesBody(req), nil
+			}
+		}
+	}
+
 	baseURL := resolveGeminiBaseURL(auth)
 	if strings.TrimSpace(baseURL) == "" {
 		return "", "", nil, statusErr{code: http.StatusServiceUnavailable, msg: "gemini files: missing base url"}

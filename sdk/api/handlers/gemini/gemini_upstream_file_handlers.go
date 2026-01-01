@@ -31,6 +31,7 @@ const (
 
 type uploadSession struct {
 	authID    string
+	uploadURL string
 	expiresAt time.Time
 }
 
@@ -52,8 +53,7 @@ func (h *GeminiUpstreamFileAPIHandler) UploadFile(c *gin.Context) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	protocol := c.GetHeader("X-Goog-Upload-Protocol")
-	if strings.EqualFold(protocol, "resumable") {
+	if shouldTreatAsResumableUpload(c) {
 		h.handleResumableUpload(c)
 		return
 	}
@@ -111,7 +111,7 @@ func (h *GeminiUpstreamFileAPIHandler) handleResumableStart(c *gin.Context) {
 
 func (h *GeminiUpstreamFileAPIHandler) handleResumableFollowUp(c *gin.Context, cmd string) {
 	uploadID := strings.TrimSpace(c.Query("upload_id"))
-	authID, ok := h.sessionAuthID(uploadID)
+	session, ok := h.sessionInfo(uploadID)
 	if !ok {
 		writeGeminiFileError(c, http.StatusBadRequest, "missing or expired upload_id", "INVALID_ARGUMENT")
 		return
@@ -125,8 +125,15 @@ func (h *GeminiUpstreamFileAPIHandler) handleResumableFollowUp(c *gin.Context, c
 	}
 	opts := fileOptionsFromRequest(c)
 	opts.Metadata = map[string]any{
-		coreauth.ForceAuthIDMetadataKey: authID,
+		coreauth.ForceAuthIDMetadataKey: session.authID,
 		coreauth.NoRetryMetadataKey:     true,
+	}
+	if strings.TrimSpace(session.uploadURL) != "" {
+		if opts.Metadata == nil {
+			opts.Metadata = make(map[string]any)
+		}
+		opts.Metadata[coreexecutor.GeminiFilesUploadURLMetadataKey] = session.uploadURL
+		opts.Query = nil
 	}
 	resp, err := h.execute(c.Request.Context(), req, opts)
 	if strings.Contains(strings.ToLower(cmd), "finalize") && err == nil {
@@ -244,7 +251,7 @@ func (h *GeminiUpstreamFileAPIHandler) writeResumableStartResponse(c *gin.Contex
 	uploadURL := hdr.Get("X-Goog-Upload-URL")
 	uploadID := extractUploadID(uploadURL)
 	if uploadID != "" {
-		h.bindSession(uploadID, authIDFromMetadata(resp.Metadata))
+		h.bindSession(uploadID, authIDFromMetadata(resp.Metadata), sanitizeUploadURL(uploadURL))
 		hdr.Set("X-Goog-Upload-URL", buildProxyUploadURL(c, uploadID))
 	}
 	writeProxyResponseWithHeaders(c, status, hdr, resp.Payload)
@@ -294,12 +301,11 @@ func writeProxyError(c *gin.Context, err error) {
 	msg := ""
 	trimmed := bytes.TrimSpace(body)
 	if json.Valid(trimmed) {
-		msg = extractUpstreamMessage(trimmed)
-		// Preserve upstream payload only when it looks like the official shape.
-		if msg != "" && hasOfficialErrorShape(trimmed) {
-			c.Data(status, "application/json", trimmed)
+		if hasOfficialErrorShape(trimmed) {
+			c.Data(status, "application/json", normalizeOfficialErrorPayload(trimmed, status))
 			return
 		}
+		msg = extractUpstreamMessage(trimmed)
 		if msg == "" {
 			msg = http.StatusText(status)
 		}
@@ -339,6 +345,35 @@ func hasOfficialErrorShape(payload []byte) bool {
 	}
 	_, ok := obj["error"].(map[string]any)
 	return ok
+}
+
+func normalizeOfficialErrorPayload(payload []byte, status int) []byte {
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return payload
+	}
+	errObj, ok := obj["error"].(map[string]any)
+	if !ok {
+		return payload
+	}
+	msg, _ := errObj["message"].(string)
+	if strings.TrimSpace(msg) == "" {
+		if topMsg, _ := obj["message"].(string); strings.TrimSpace(topMsg) != "" {
+			errObj["message"] = topMsg
+		} else {
+			errObj["message"] = http.StatusText(status)
+		}
+	}
+	st, _ := errObj["status"].(string)
+	if strings.TrimSpace(st) == "" || strings.Contains(st, " ") {
+		errObj["status"] = googleStatusForHTTP(status)
+	}
+	obj["error"] = errObj
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return payload
+	}
+	return out
 }
 
 func contentTypeFromBytes(body []byte) string {
@@ -448,9 +483,25 @@ func extractUploadID(raw string) string {
 	return strings.TrimSpace(u.Query().Get("upload_id"))
 }
 
+func sanitizeUploadURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil {
+		return strings.TrimSpace(raw)
+	}
+	q := u.Query()
+	q.Del("key")
+	q.Del("auth_token")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func buildProxyUploadURL(c *gin.Context, uploadID string) string {
 	if c == nil || c.Request == nil {
-		return "/upload/v1beta/files?upload_id=" + url.QueryEscape(uploadID)
+		out := "/upload/v1beta/files?upload_id=" + url.QueryEscape(uploadID)
+		if key := strings.TrimSpace(apiKeyFromRequest(c)); key != "" {
+			out += "&key=" + url.QueryEscape(key)
+		}
+		return out
 	}
 	scheme := "http"
 	if c.Request.TLS != nil {
@@ -463,7 +514,11 @@ func buildProxyUploadURL(c *gin.Context, uploadID string) string {
 	if host == "" {
 		host = strings.TrimSpace(c.Request.Host)
 	}
-	return scheme + "://" + host + "/upload/v1beta/files?upload_id=" + url.QueryEscape(uploadID)
+	out := scheme + "://" + host + "/upload/v1beta/files?upload_id=" + url.QueryEscape(uploadID)
+	if key := strings.TrimSpace(apiKeyFromRequest(c)); key != "" {
+		out += "&key=" + url.QueryEscape(key)
+	}
+	return out
 }
 
 func applyResponseHeaders(c *gin.Context, hdr http.Header) {
@@ -508,7 +563,7 @@ func writeGeminiFileError(c *gin.Context, status int, message, code string) {
 	})
 }
 
-func (h *GeminiUpstreamFileAPIHandler) bindSession(uploadID, authID string) {
+func (h *GeminiUpstreamFileAPIHandler) bindSession(uploadID, authID, uploadURL string) {
 	if strings.TrimSpace(uploadID) == "" || strings.TrimSpace(authID) == "" {
 		return
 	}
@@ -516,26 +571,26 @@ func (h *GeminiUpstreamFileAPIHandler) bindSession(uploadID, authID string) {
 	if h.sessions == nil {
 		h.sessions = make(map[string]uploadSession)
 	}
-	h.sessions[uploadID] = uploadSession{authID: authID, expiresAt: time.Now().Add(2 * time.Hour)}
+	h.sessions[uploadID] = uploadSession{authID: authID, uploadURL: uploadURL, expiresAt: time.Now().Add(2 * time.Hour)}
 	h.mu.Unlock()
 }
 
-func (h *GeminiUpstreamFileAPIHandler) sessionAuthID(uploadID string) (string, bool) {
+func (h *GeminiUpstreamFileAPIHandler) sessionInfo(uploadID string) (uploadSession, bool) {
 	uploadID = strings.TrimSpace(uploadID)
 	if uploadID == "" {
-		return "", false
+		return uploadSession{}, false
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
-		return "", false
+		return uploadSession{}, false
 	}
 	s, ok := h.sessions[uploadID]
 	if !ok || s.authID == "" || time.Now().After(s.expiresAt) {
 		delete(h.sessions, uploadID)
-		return "", false
+		return uploadSession{}, false
 	}
-	return s.authID, true
+	return s, true
 }
 
 func (h *GeminiUpstreamFileAPIHandler) dropSession(uploadID string) {

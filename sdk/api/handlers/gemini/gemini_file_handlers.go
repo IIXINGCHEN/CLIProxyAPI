@@ -44,9 +44,12 @@ func (h *GeminiFileAPIHandler) UploadFile(c *gin.Context) {
 	// Check upload type from header
 	uploadType := c.GetHeader("X-Goog-Upload-Protocol")
 
-	switch uploadType {
-	case "resumable":
+	if shouldTreatAsResumableUpload(c) {
 		h.handleResumableUpload(c)
+		return
+	}
+
+	switch uploadType {
 	case "multipart", "":
 		h.handleMultipartUpload(c)
 	default:
@@ -175,7 +178,7 @@ func (h *GeminiFileAPIHandler) handleResumableStart(c *gin.Context) {
 	sessionID := filestore.GenerateFileID()
 
 	// Return session URL
-	uploadURL := fmt.Sprintf("/upload/v1beta/files?upload_id=%s", sessionID)
+	uploadURL := buildProxyUploadURL(c, sessionID)
 
 	c.Header("X-Goog-Upload-URL", uploadURL)
 	c.Header("X-Goog-Upload-Status", "active")
