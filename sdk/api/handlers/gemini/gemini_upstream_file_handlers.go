@@ -291,11 +291,21 @@ func writeProxyError(c *gin.Context, err error) {
 			applyResponseHeaders(c, hdr)
 		}
 	}
-	if json.Valid(bytes.TrimSpace(body)) {
-		c.Data(status, "application/json", body)
-		return
+	msg := ""
+	trimmed := bytes.TrimSpace(body)
+	if json.Valid(trimmed) {
+		msg = extractUpstreamMessage(trimmed)
+		// Preserve upstream payload only when it looks like the official shape.
+		if msg != "" && hasOfficialErrorShape(trimmed) {
+			c.Data(status, "application/json", trimmed)
+			return
+		}
+		if msg == "" {
+			msg = http.StatusText(status)
+		}
+	} else {
+		msg = string(body)
 	}
-	msg := string(body)
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"code":    status,
@@ -304,6 +314,31 @@ func writeProxyError(c *gin.Context, err error) {
 		},
 		"message": msg,
 	})
+}
+
+func extractUpstreamMessage(payload []byte) string {
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return ""
+	}
+	if errVal, ok := obj["error"].(map[string]any); ok {
+		if msg, _ := errVal["message"].(string); strings.TrimSpace(msg) != "" {
+			return msg
+		}
+	}
+	if msg, _ := obj["message"].(string); strings.TrimSpace(msg) != "" {
+		return msg
+	}
+	return ""
+}
+
+func hasOfficialErrorShape(payload []byte) bool {
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return false
+	}
+	_, ok := obj["error"].(map[string]any)
+	return ok
 }
 
 func contentTypeFromBytes(body []byte) string {
