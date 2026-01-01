@@ -263,6 +263,14 @@ func writeProxyError(c *gin.Context, err error) {
 	if len(body) == 0 {
 		body = []byte(http.StatusText(status))
 	}
+	if ae, ok := err.(*coreauth.Error); ok && ae != nil {
+		switch ae.Code {
+		case "auth_not_found":
+			body = []byte("gemini files: no gemini credentials available (configure gemini-api-key in config.yaml, or switch gemini-file-cache.mode to local)")
+		case "executor_not_found":
+			body = []byte("gemini files: gemini executor is not ready (restart server, and ensure you run the latest version)")
+		}
+	}
 	if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
 		if code := se.StatusCode(); code > 0 {
 			status = code
