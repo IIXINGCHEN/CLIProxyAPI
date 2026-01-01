@@ -64,3 +64,23 @@ func TestRewriteLocalFileParts_OtherAPIKeyRejected(t *testing.T) {
 		t.Fatalf("expected not found error, got: %v", err)
 	}
 }
+
+func TestRewriteLocalFileParts_IgnoresNonLocalFileID(t *testing.T) {
+	store, err := filestore.NewGeminiFileStore(t.TempDir(), 48, 0)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	req := []byte(`{"contents":[{"role":"user","parts":[{"file_data":{"file_uri":"files/abc123","mime_type":"audio/mpeg"}}]}]}`)
+	out, err := rewriteLocalFileParts(context.Background(), req, store, "key-a")
+	if err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if !gjson.GetBytes(out, "contents.0.parts.0.file_data.file_uri").Exists() {
+		t.Fatalf("expected file_data retained")
+	}
+	if gjson.GetBytes(out, "contents.0.parts.0.inline_data").Exists() {
+		t.Fatalf("expected inline_data absent")
+	}
+}

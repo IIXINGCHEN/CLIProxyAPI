@@ -67,12 +67,31 @@ func parseLocalFilePart(contentIndex, partIndex int, part gjson.Result) (filePar
 	if !strings.HasPrefix(fileURI, "files/") {
 		return filePartRef{}, false
 	}
+	if !isLocalCacheFileID(strings.TrimPrefix(fileURI, "files/")) {
+		return filePartRef{}, false
+	}
 	return filePartRef{
 		contentIndex: contentIndex,
 		partIndex:    partIndex,
 		fileURI:      fileURI,
 		mimeType:     mimeType,
 	}, true
+}
+
+func isLocalCacheFileID(fileID string) bool {
+	if len(fileID) != 32 {
+		return false
+	}
+	for i := 0; i < len(fileID); i++ {
+		c := fileID[i]
+		isDigit := c >= '0' && c <= '9'
+		isLowerHex := c >= 'a' && c <= 'f'
+		isUpperHex := c >= 'A' && c <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
+			return false
+		}
+	}
+	return true
 }
 
 func inlineLocalFilePart(ctx context.Context, payload []byte, store *filestore.GeminiFileStore, apiKey string, ref filePartRef) ([]byte, error) {

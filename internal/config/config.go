@@ -217,6 +217,13 @@ type GeminiFileCacheConfig struct {
 	// Enable toggles local file caching for Gemini File API uploads.
 	Enable bool `yaml:"enable" json:"enable"`
 
+	// Mode controls how Gemini Files API requests are handled.
+	// Supported values:
+	// - "upstream": proxy Gemini Files API to the upstream Gemini service (official behavior).
+	// - "local": store uploads locally and rewrite file references to inline_data.
+	// When empty, defaults to "upstream".
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+
 	// StoragePath specifies the directory for cached files. Empty defaults to "./gemini-files".
 	StoragePath string `yaml:"storage-path,omitempty" json:"storage-path,omitempty"`
 

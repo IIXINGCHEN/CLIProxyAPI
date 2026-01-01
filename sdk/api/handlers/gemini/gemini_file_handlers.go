@@ -24,6 +24,13 @@ type GeminiFileAPIHandler struct {
 	fileStore *filestore.GeminiFileStore
 }
 
+func (h *GeminiFileAPIHandler) LocalFileStore() *filestore.GeminiFileStore {
+	if h == nil {
+		return nil
+	}
+	return h.fileStore
+}
+
 // NewGeminiFileAPIHandler creates a new file API handler
 func NewGeminiFileAPIHandler(store *filestore.GeminiFileStore) *GeminiFileAPIHandler {
 	return &GeminiFileAPIHandler{

@@ -77,6 +77,10 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
 	defer reporter.trackFailure(ctx, &err)
 
+	if geminiFilesAction(req.Metadata) != "" {
+		return e.executeFiles(ctx, auth, req, opts)
+	}
+
 	model := req.Model
 	if override := e.resolveUpstreamModel(model, auth); override != "" {
 		model = override

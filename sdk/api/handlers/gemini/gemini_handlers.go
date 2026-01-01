@@ -25,7 +25,15 @@ import (
 // It holds a pool of clients to interact with the backend service.
 type GeminiAPIHandler struct {
 	*handlers.BaseAPIHandler
-	FileHandler *GeminiFileAPIHandler // Optional file API handler
+	FileHandler GeminiFileHandler // Optional file API handler
+}
+
+// GeminiFileHandler defines the subset of Gemini Files API endpoints supported by this server.
+type GeminiFileHandler interface {
+	UploadFile(c *gin.Context)
+	GetFile(c *gin.Context)
+	ListFiles(c *gin.Context)
+	DeleteFile(c *gin.Context)
 }
 
 // NewGeminiAPIHandler creates a new Gemini API handlers instance.
@@ -386,7 +394,13 @@ func localFileStore(h *GeminiAPIHandler) *filestore.GeminiFileStore {
 	if h == nil || h.FileHandler == nil {
 		return nil
 	}
-	return h.FileHandler.fileStore
+	type localStoreProvider interface {
+		LocalFileStore() *filestore.GeminiFileStore
+	}
+	if provider, ok := h.FileHandler.(localStoreProvider); ok {
+		return provider.LocalFileStore()
+	}
+	return nil
 }
 
 func respondFileRewriteResult(c *gin.Context, payload []byte, err error) ([]byte, bool) {

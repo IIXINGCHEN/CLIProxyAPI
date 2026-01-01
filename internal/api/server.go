@@ -319,13 +319,12 @@ func (s *Server) setupRoutes() {
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
 	openaiResponsesHandlers := openai.NewOpenAIResponsesAPIHandler(s.handlers)
 
-	// Initialize Gemini file store and attach file handler
-	fileStore, err := InitializeGeminiFileStore(s.cfg)
+	// Initialize Gemini file support (upstream or local cache) and attach file handler
+	fileStore, err := InitializeGeminiFileSupport(s.cfg, geminiHandlers)
 	if err != nil {
-		log.WithError(err).Warn("failed to initialize gemini file store")
+		log.WithError(err).Warn("failed to initialize gemini file support")
 	} else if fileStore != nil {
 		s.geminiFileStore = fileStore
-		AttachGeminiFileHandler(geminiHandlers, fileStore)
 	}
 
 	// OpenAI compatible API routes

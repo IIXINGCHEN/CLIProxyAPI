@@ -379,6 +379,7 @@ type statusErr struct {
 	code       int
 	msg        string
 	retryAfter *time.Duration
+	headers    http.Header
 }
 
 func (e statusErr) Error() string {
@@ -389,3 +390,9 @@ func (e statusErr) Error() string {
 }
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
+func (e statusErr) Headers() http.Header {
+	if e.headers == nil {
+		return nil
+	}
+	return e.headers.Clone()
+}

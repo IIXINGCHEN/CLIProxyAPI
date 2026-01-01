@@ -46,6 +46,16 @@ const (
 	quotaBackoffMax       = 30 * time.Minute
 )
 
+const (
+	// ForceAuthIDMetadataKey forces execution to use the specified auth ID when possible.
+	ForceAuthIDMetadataKey = "_cliproxy_force_auth_id"
+	// NoRetryMetadataKey disables multi-auth failover/retries for a single request.
+	// This is required for non-replayable request bodies such as streaming uploads.
+	NoRetryMetadataKey = "_cliproxy_no_retry"
+	// SelectedAuthIDMetadataKey is injected into successful executor responses to expose the chosen auth ID.
+	SelectedAuthIDMetadataKey = "_cliproxy_auth_id"
+)
+
 var quotaCooldownDisabled atomic.Bool
 
 // SetQuotaCooldownDisabled toggles quota cooldown scheduling globally.
@@ -268,6 +278,9 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 	rotated := m.rotateProviders(req.Model, normalized)
 
 	retryTimes, maxWait := m.retrySettings()
+	if forceAuthIDFromOptions(opts.Metadata) != "" || noRetryFromOptions(opts.Metadata) {
+		retryTimes = 0
+	}
 	attempts := retryTimes + 1
 	if attempts < 1 {
 		attempts = 1
@@ -377,6 +390,12 @@ func (m *Manager) executeWithProvider(ctx context.Context, provider string, req 
 		return cliproxyexecutor.Response{}, &Error{Code: "provider_not_found", Message: "provider identifier is empty"}
 	}
 	routeModel := req.Model
+	if forced := forceAuthIDFromOptions(opts.Metadata); forced != "" {
+		return m.executeWithForcedAuth(ctx, provider, routeModel, req, opts, forced)
+	}
+	if noRetryFromOptions(opts.Metadata) {
+		return m.executeWithSinglePick(ctx, provider, routeModel, req, opts)
+	}
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
@@ -430,8 +449,140 @@ func (m *Manager) executeWithProvider(ctx context.Context, provider string, req 
 			continue
 		}
 		m.MarkResult(execCtx, result)
+		resp = withSelectedAuthID(resp, auth.ID)
 		return resp, nil
 	}
+}
+
+func forceAuthIDFromOptions(meta map[string]any) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	v, _ := meta[ForceAuthIDMetadataKey].(string)
+	return strings.TrimSpace(v)
+}
+
+func noRetryFromOptions(meta map[string]any) bool {
+	if len(meta) == 0 {
+		return false
+	}
+	switch v := meta[NoRetryMetadataKey].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return false
+	}
+}
+
+func withSelectedAuthID(resp cliproxyexecutor.Response, authID string) cliproxyexecutor.Response {
+	authID = strings.TrimSpace(authID)
+	if authID == "" {
+		return resp
+	}
+	if resp.Metadata == nil {
+		resp.Metadata = make(map[string]any, 1)
+	}
+	resp.Metadata[SelectedAuthIDMetadataKey] = authID
+	return resp
+}
+
+func (m *Manager) executeWithForcedAuth(ctx context.Context, provider, routeModel string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, forcedID string) (cliproxyexecutor.Response, error) {
+	auth, executor, errPick := m.pickForcedAuth(ctx, provider, routeModel, opts, forcedID)
+	if errPick != nil {
+		return cliproxyexecutor.Response{}, errPick
+	}
+	execCtx := ctx
+	if rt := m.roundTripperFor(auth); rt != nil {
+		execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
+		execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
+	}
+	execReq := req
+	execReq.Model, execReq.Metadata = rewriteModelForAuth(routeModel, req.Metadata, auth)
+	execReq.Model, execReq.Metadata = m.applyOAuthModelMapping(auth, execReq.Model, execReq.Metadata)
+	resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
+	result := Result{AuthID: auth.ID, Provider: provider, Model: routeModel, Success: errExec == nil}
+	if errExec != nil {
+		result.Error = &Error{Message: errExec.Error()}
+		var se cliproxyexecutor.StatusError
+		if errors.As(errExec, &se) && se != nil {
+			result.Error.HTTPStatus = se.StatusCode()
+		}
+		if ra := retryAfterFromError(errExec); ra != nil {
+			result.RetryAfter = ra
+		}
+		m.MarkResult(execCtx, result)
+		return cliproxyexecutor.Response{}, errExec
+	}
+	m.MarkResult(execCtx, result)
+	return withSelectedAuthID(resp, auth.ID), nil
+}
+
+func (m *Manager) executeWithSinglePick(ctx context.Context, provider, routeModel string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	auth, executor, errPick := m.pickNext(ctx, provider, routeModel, opts, map[string]struct{}{})
+	if errPick != nil {
+		return cliproxyexecutor.Response{}, errPick
+	}
+	execCtx := ctx
+	if rt := m.roundTripperFor(auth); rt != nil {
+		execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
+		execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
+	}
+	execReq := req
+	execReq.Model, execReq.Metadata = rewriteModelForAuth(routeModel, req.Metadata, auth)
+	execReq.Model, execReq.Metadata = m.applyOAuthModelMapping(auth, execReq.Model, execReq.Metadata)
+	resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
+	result := Result{AuthID: auth.ID, Provider: provider, Model: routeModel, Success: errExec == nil}
+	if errExec != nil {
+		result.Error = &Error{Message: errExec.Error()}
+		var se cliproxyexecutor.StatusError
+		if errors.As(errExec, &se) && se != nil {
+			result.Error.HTTPStatus = se.StatusCode()
+		}
+		if ra := retryAfterFromError(errExec); ra != nil {
+			result.RetryAfter = ra
+		}
+		m.MarkResult(execCtx, result)
+		return cliproxyexecutor.Response{}, errExec
+	}
+	m.MarkResult(execCtx, result)
+	return withSelectedAuthID(resp, auth.ID), nil
+}
+
+func (m *Manager) pickForcedAuth(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, forcedID string) (*Auth, ProviderExecutor, error) {
+	_ = ctx
+	_ = opts
+	forcedID = strings.TrimSpace(forcedID)
+	if forcedID == "" {
+		return nil, nil, &Error{Code: "auth_not_found", Message: "forced auth id is empty"}
+	}
+	auth, ok := m.GetByID(forcedID)
+	if !ok || auth == nil {
+		return nil, nil, &Error{Code: "auth_not_found", Message: "forced auth not found"}
+	}
+	if strings.ToLower(strings.TrimSpace(auth.Provider)) != strings.ToLower(strings.TrimSpace(provider)) {
+		return nil, nil, &Error{Code: "auth_not_found", Message: "forced auth does not match provider"}
+	}
+	blocked, _, _ := isAuthBlockedForModel(auth, model, time.Now())
+	if blocked {
+		return nil, nil, &Error{Code: "auth_unavailable", Message: "forced auth unavailable"}
+	}
+	m.mu.RLock()
+	executor, okExecutor := m.executors[provider]
+	m.mu.RUnlock()
+	if !okExecutor || executor == nil {
+		return nil, nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
+	}
+	return auth, executor, nil
+}
+
+// PickAuth selects an auth candidate using the active selector without executing a request.
+// This is useful for non-replayable requests (e.g., streaming uploads) where the caller
+// must pin subsequent calls to the same auth.
+func (m *Manager) PickAuth(ctx context.Context, provider, model string, opts cliproxyexecutor.Options) (*Auth, error) {
+	auth, _, err := m.pickNext(ctx, provider, model, opts, map[string]struct{}{})
+	return auth, err
 }
 
 func (m *Manager) executeCountWithProvider(ctx context.Context, provider string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
