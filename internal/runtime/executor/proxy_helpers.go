@@ -14,6 +14,28 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+func defaultDirectTransport() *http.Transport {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if ok && base != nil {
+		out := base.Clone()
+		out.Proxy = http.ProxyFromEnvironment
+		out.DialContext = defaultDialer().DialContext
+		return out
+	}
+	return &http.Transport{
+		Proxy:       http.ProxyFromEnvironment,
+		DialContext: defaultDialer().DialContext,
+	}
+}
+
+func defaultDialer() *net.Dialer {
+	return &net.Dialer{
+		Timeout:       10 * time.Second,
+		KeepAlive:     30 * time.Second,
+		FallbackDelay: 200 * time.Millisecond,
+	}
+}
+
 // newProxyAwareHTTPClient creates an HTTP client with proper proxy configuration priority:
 // 1. Use auth.ProxyURL if configured (highest priority)
 // 2. Use cfg.ProxyURL if auth proxy is not configured
@@ -58,8 +80,10 @@ func newProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *clip
 	// Priority 3: Use RoundTripper from context (typically from RoundTripperFor)
 	if rt, ok := ctx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
 		httpClient.Transport = rt
+		return httpClient
 	}
 
+	httpClient.Transport = defaultDirectTransport()
 	return httpClient
 }
 

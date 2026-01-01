@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -263,6 +265,14 @@ func writeProxyError(c *gin.Context, err error) {
 	if len(body) == 0 {
 		body = []byte(http.StatusText(status))
 	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr != nil {
+		if netErr.Timeout() {
+			body = []byte("gemini files: upstream request timed out (check network or configure proxy-url)")
+		} else {
+			body = []byte("gemini files: upstream request failed (check network or configure proxy-url)")
+		}
+	}
 	if ae, ok := err.(*coreauth.Error); ok && ae != nil {
 		switch ae.Code {
 		case "auth_not_found":
@@ -334,6 +344,13 @@ func unpackProxyMetadata(meta map[string]any) (int, http.Header) {
 func proxyErrorStatus(err error) int {
 	if err == nil {
 		return http.StatusInternalServerError
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr != nil {
+		if netErr.Timeout() {
+			return http.StatusGatewayTimeout
+		}
+		return http.StatusServiceUnavailable
 	}
 	if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
 		if code := se.StatusCode(); code > 0 {
