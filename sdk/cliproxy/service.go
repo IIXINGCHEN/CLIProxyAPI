@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
 	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/wsrelay"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
@@ -438,6 +439,10 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 
+	s.ensureWebsocketGateway()
+	s.bootstrapCoreAuths(ctx)
+	s.rebindExecutors()
+
 	tokenResult, err := s.tokenProvider.Load(ctx, s.cfg)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -589,6 +594,44 @@ func (s *Service) Run(ctx context.Context) error {
 		return ctx.Err()
 	case err = <-s.serverErr:
 		return err
+	}
+}
+
+type authSynthesizer interface {
+	Synthesize(ctx *synthesizer.SynthesisContext) ([]*coreauth.Auth, error)
+}
+
+func (s *Service) bootstrapCoreAuths(ctx context.Context) {
+	sc := s.synthesisContext()
+	if sc == nil {
+		return
+	}
+	s.bootstrapCoreAuthsWith(ctx, sc, synthesizer.NewConfigSynthesizer())
+	s.bootstrapCoreAuthsWith(ctx, sc, synthesizer.NewFileSynthesizer())
+}
+
+func (s *Service) bootstrapCoreAuthsWith(ctx context.Context, sc *synthesizer.SynthesisContext, synth authSynthesizer) {
+	auths, err := synth.Synthesize(sc)
+	if err != nil {
+		return
+	}
+	for _, auth := range auths {
+		s.applyCoreAuthAddOrUpdate(ctx, auth)
+	}
+}
+
+func (s *Service) synthesisContext() *synthesizer.SynthesisContext {
+	if s == nil || s.cfg == nil || s.coreManager == nil {
+		return nil
+	}
+	if strings.TrimSpace(s.cfg.AuthDir) == "" {
+		return nil
+	}
+	return &synthesizer.SynthesisContext{
+		Config:      s.cfg,
+		AuthDir:     s.cfg.AuthDir,
+		Now:         time.Now(),
+		IDGenerator: synthesizer.NewStableIDGenerator(),
 	}
 }
 

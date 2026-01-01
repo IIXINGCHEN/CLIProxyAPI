@@ -46,6 +46,11 @@ GEMINI.md
 _bmad/*
 _bmad-output/*
 
+# Python (local development)
+.venv/*
+__pycache__/*
+test_genai_files_*.py
+
 # macOS
 .DS_Store
 ._*
